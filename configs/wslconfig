@@ -1,0 +1,15 @@
+# .wslconfig — Optimized for 4kupscaler on 32GB system
+#
+# Copy this file to %USERPROFILE%\.wslconfig on the Windows side, then:
+#   wsl --shutdown
+#   (reopen WSL2 terminal)
+#
+# Why these values:
+#   - BlockSwap offloads ~8-12GB of transformer blocks to system RAM
+#   - Model loading briefly peaks above normal usage
+#   - Swap provides safety buffer during weight downloads + loading
+
+[wsl2]
+memory=24GB
+processors=8
+swap=8GB
