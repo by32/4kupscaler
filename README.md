@@ -320,6 +320,24 @@ docker run --gpus all \
 
 Model weights (~3 GB for `3b-fp8`) are downloaded on first run and cached in the mounted volume so subsequent runs start immediately.
 
+### Cloud GPU (Vast.ai)
+
+For bulk processing without local GPU hardware, the included script spins up a spot GPU instance, uploads videos, runs the batch, and downloads results:
+
+```bash
+# One-time setup
+pip install vastai
+vastai set api-key YOUR_KEY   # Get from https://vast.ai/console/account/
+
+# Upscale a directory of videos on a cloud RTX 3090 (~$0.15/hr)
+./scripts/cloud-upscale.sh ./videos/ ./upscaled/
+
+# Use a faster GPU
+./scripts/cloud-upscale.sh ./videos/ ./upscaled/ --gpu "RTX 4090"
+```
+
+The script is interruption-safe: re-running with the same output directory skips already-processed files via `--skip-existing`.
+
 ## Development
 
 ```bash
