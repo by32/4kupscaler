@@ -2,7 +2,7 @@
 
 import pytest
 
-from upscaler.core.video_io import enforce_4n1
+from upscaler.core.video_io import VideoMeta, enforce_4n1
 
 
 class TestEnforce4n1:
@@ -30,3 +30,20 @@ class TestEnforce4n1:
             result = enforce_4n1(n)
             assert result >= n or n == 0
             assert (result - 1) % 4 == 0
+
+
+class TestVideoMeta:
+    def test_duration(self) -> None:
+        meta = VideoMeta(fps=30.0, frame_count=150, width=1920, height=1080)
+        assert meta.duration == 5.0
+
+    def test_duration_zero_fps(self) -> None:
+        meta = VideoMeta(fps=0.0, frame_count=100, width=640, height=480)
+        assert meta.duration == 0.0
+
+    def test_fields(self) -> None:
+        meta = VideoMeta(fps=24.0, frame_count=240, width=3840, height=2160)
+        assert meta.fps == 24.0
+        assert meta.frame_count == 240
+        assert meta.width == 3840
+        assert meta.height == 2160

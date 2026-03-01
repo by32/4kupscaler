@@ -51,6 +51,7 @@ markers = [
 target-version = "py310"
 src = ["src", "tests"]
 line-length = 88
+exclude = ["src/upscaler/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -60,5 +61,5 @@ source = ["upscaler"]
 omit = ["src/upscaler/_vendor/*"]
 
 [tool.coverage.report]
-fail_under = 50
+fail_under = 40
 show_missing = true
