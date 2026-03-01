@@ -55,3 +55,4 @@ jobs:
           tag_with_latest: true
           cache: true
           cache_registry: ghcr.io/${{ github.repository }}/cache
+          extra_args: --single-snapshot --snapshot-mode=redo
