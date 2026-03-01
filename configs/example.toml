@@ -1,0 +1,27 @@
+# 4KUpscaler configuration
+# Copy to ./upscaler.toml and customize as needed.
+
+[model]
+name = "3b-fp8"                    # 3b-fp8, 3b-fp16, 7b-fp8, 7b-fp16
+dir = "~/.cache/upscaler/models"   # Model weight storage
+
+[output]
+resolution = 1072                  # Short-side target resolution (pixels)
+format = "video"                   # "video" or "png"
+seed = 100
+
+[performance]
+batch_size = 1                     # Frames per batch (must follow 4n+1 rule)
+preserve_vram = true               # Unload unused models during processing
+cuda_device = "0"
+
+[performance.block_swap]
+blocks_to_swap = 20                # Transformer blocks offloaded to CPU (0-32 for 3B, 0-36 for 7B)
+use_non_blocking = true
+offload_io_components = false
+cache_model = false
+
+[processing]
+color_correction = false
+skip_first_frames = 0
+# max_frames = 100                 # Uncomment to limit frames (useful for testing)
