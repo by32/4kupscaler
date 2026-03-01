@@ -223,6 +223,59 @@ Presets provide tuned defaults for specific GPUs. Use with `--preset`:
 
 BlockSwap offloads transformer blocks to CPU RAM, trading speed for VRAM savings. Higher values = less VRAM, slower inference.
 
+## Performance Tuning
+
+### Benchmarking your hardware
+
+Before committing to a long job, benchmark your per-frame speed:
+
+```bash
+time upscaler preview input.mp4 --frames 5 --preset rtx3080 -v
+```
+
+Divide wall time by 5 to get your per-frame cost. Multiply by total frames (`frames = duration × fps`) to estimate full job time.
+
+### The knobs that matter
+
+| Setting | What it does | Speed impact | VRAM impact |
+|---------|-------------|-------------|-------------|
+| `--blocks-to-swap` | Offloads transformer blocks to CPU | **Biggest factor.** Fewer swaps = faster, but needs more VRAM | Each block saved ≈ reclaims ~100-200 MB VRAM |
+| `--batch-size` | Frames processed per batch | Larger batches amortize overhead, ~linear speedup | More VRAM per batch |
+| `--model` | Model size (3B vs 7B) | 7B is ~2-3x slower than 3B | 7B needs significantly more VRAM |
+| `--resolution` | Output short-side pixels | Higher = more compute per frame | Higher = more VRAM for VAE tiling |
+| `--max-frames` | Cap total frames processed | Process a segment instead of the full video | No effect |
+
+### Tuning strategy
+
+**Start safe, then push:**
+
+1. Start with `--preset rtx3080` (conservative: batch_size=1, blocks_to_swap=20)
+2. Run a 5-frame preview to confirm no OOM errors
+3. Reduce `--blocks-to-swap` gradually (20 → 16 → 12) — watch for CUDA OOM
+4. If stable, try `--batch-size 5` (must follow 4n+1 rule: 1, 5, 9, 13...)
+5. Each successful reduction in BlockSwap or increase in batch size gives meaningful speedup
+
+**If you hit CUDA out-of-memory:**
+
+- Increase `--blocks-to-swap` (offload more to CPU)
+- Reduce `--batch-size` back to 1
+- Ensure `--preserve-vram` is enabled (default)
+- Close other GPU-consuming applications
+
+### Processing time expectations
+
+Processing time scales linearly with frame count. For a rough estimate:
+
+```
+total_time ≈ per_frame_seconds × video_duration_seconds × fps
+```
+
+A 5-minute video at 30 fps = 9,000 frames. If your preview benchmark shows 2 seconds/frame, that's ~5 hours. Plan accordingly — batch processing with `--skip-existing` lets you resume interrupted jobs.
+
+### CPU and RAM considerations
+
+BlockSwap offloads transformer blocks to **system RAM**, not just CPU compute. With `blocks_to_swap=20`, expect ~8-12 GB of RAM usage on top of normal system usage. Ensure your system has sufficient free memory, especially on WSL2 where the default memory limit may need adjusting (see `.wslconfig`).
+
 ## Docker
 
 ### Prerequisites
