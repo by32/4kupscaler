@@ -14,8 +14,6 @@ from upscaler.core.engine import UpscaleEngine
 from upscaler.core.video_io import SUPPORTED_EXTENSIONS
 from upscaler.progress.reporter import ProgressReporter
 
-app = typer.Typer()
-
 
 def _find_videos(input_dir: Path, pattern: str) -> list[Path]:
     """Glob for video files matching the pattern with supported extensions."""
@@ -23,7 +21,6 @@ def _find_videos(input_dir: Path, pattern: str) -> list[Path]:
     return [f for f in candidates if f.suffix.lower() in SUPPORTED_EXTENSIONS]
 
 
-@app.callback(invoke_without_command=True)
 def batch(
     input_dir: Annotated[
         str, typer.Argument(help="Directory containing input videos.")

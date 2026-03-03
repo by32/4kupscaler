@@ -148,10 +148,8 @@ class UpscaleEngine:
         This is the GPU-dependent step. All vendored code calls happen here.
         """
         from upscaler._vendor.seedvr2.src.core.generation_phases import (
-            compute_generation_info,
             decode_all_batches,
             encode_all_batches,
-            log_generation_start,
             postprocess_all_batches,
             upscale_all_batches,
         )
@@ -169,6 +167,8 @@ class UpscaleEngine:
         ctx = setup_generation_context(
             dit_device=device,
             vae_device=device,
+            dit_offload_device="cpu",
+            vae_offload_device="cpu",
             debug=debug,
         )
 
@@ -199,17 +199,6 @@ class UpscaleEngine:
         ctx["text_embeds"] = load_text_embeddings(
             script_dir, ctx["dit_device"], ctx["compute_dtype"], debug
         )
-
-        # Compute generation info
-        frames, gen_info = compute_generation_info(
-            ctx=ctx,
-            images=frames,
-            resolution=cfg.resolution,
-            batch_size=cfg.batch_size,
-            seed=cfg.seed,
-            debug=debug,
-        )
-        log_generation_start(gen_info, debug)
 
         # Phase 1: Encode
         if progress_callback:

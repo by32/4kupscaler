@@ -31,6 +31,9 @@ RUN apt-get update \
        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Symlink Python to where the builder venv expects it
+RUN ln -s /usr/bin/python3.10 /usr/local/bin/python3
+
 # Copy built venv and project from builder
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src

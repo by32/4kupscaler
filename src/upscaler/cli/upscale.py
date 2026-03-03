@@ -12,10 +12,7 @@ from upscaler.cli.common import print_error, resolve_config, validate_input_path
 from upscaler.core.engine import UpscaleEngine
 from upscaler.progress.reporter import ProgressReporter
 
-app = typer.Typer()
 
-
-@app.callback(invoke_without_command=True)
 def upscale(
     input_video: Annotated[str, typer.Argument(help="Path to input video file.")],
     output: Annotated[

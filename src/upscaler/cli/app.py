@@ -8,7 +8,10 @@ from typing import Annotated
 import typer
 
 from upscaler import __version__
-from upscaler.cli import batch, config_cmd, preview, upscale
+from upscaler.cli import config_cmd
+from upscaler.cli.batch import batch
+from upscaler.cli.preview import preview
+from upscaler.cli.upscale import upscale
 
 app = typer.Typer(
     name="upscaler",
@@ -56,7 +59,7 @@ def main(
     )
 
 
-app.add_typer(upscale.app, name="upscale", help="Upscale a single video to 4K.")
-app.add_typer(preview.app, name="preview", help="Preview upscale on a few frames.")
-app.add_typer(batch.app, name="batch", help="Batch upscale a directory of videos.")
+app.command(name="upscale", help="Upscale a single video to 4K.")(upscale)
+app.command(name="preview", help="Preview upscale on a few frames.")(preview)
+app.command(name="batch", help="Batch upscale a directory of videos.")(batch)
 app.add_typer(config_cmd.app, name="config", help="Manage configuration.")

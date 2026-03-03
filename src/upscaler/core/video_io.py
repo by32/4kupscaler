@@ -180,8 +180,7 @@ def write_video(
     import numpy as np
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    frames_np = (frames_tensor.cpu().numpy() * 255.0).astype(np.uint8)
-    t, h, w, _c = frames_np.shape
+    t, h, w, _c = frames_tensor.shape
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
@@ -190,8 +189,9 @@ def write_video(
         raise ValueError(msg)
 
     try:
-        for frame in frames_np:
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        for i in range(t):
+            frame_np = (frames_tensor[i].cpu().numpy() * 255.0).astype(np.uint8)
+            frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
             writer.write(frame_bgr)
     finally:
         writer.release()
@@ -218,13 +218,14 @@ def write_frames_as_png(
     import numpy as np
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    frames_np = (frames_tensor.cpu().numpy() * 255.0).astype(np.uint8)
+    t = frames_tensor.shape[0]
 
-    for idx, frame in enumerate(frames_np):
+    for idx in range(t):
         filename = f"{base_name}_{idx:06d}.png"
         filepath = output_dir / filename
-        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame_np = (frames_tensor[idx].cpu().numpy() * 255.0).astype(np.uint8)
+        frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(filepath), frame_bgr)
 
-    logger.info("Saved %d PNGs to %s", len(frames_np), output_dir)
-    return len(frames_np)
+    logger.info("Saved %d PNGs to %s", t, output_dir)
+    return t

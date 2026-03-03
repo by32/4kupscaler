@@ -26,6 +26,12 @@ gpu = [
     "huggingface-hub",
     "safetensors",
     "mediapy",
+    "psutil",
+    "diffusers",
+    "tqdm",
+    "rotary-embedding-torch",
+    "numpy",
+    "Pillow",
 ]
 
 [dependency-groups]
