@@ -102,6 +102,7 @@ def test_upscale_shows_all_options() -> None:
     assert "--preset" in output
     assert "--seed" in output
     assert "--output-format" in output
+    assert "--segment-size" in output
 
 
 # ── preview subcommand ────────────────────────────────────
@@ -141,6 +142,7 @@ def test_batch_shows_options() -> None:
     assert "--output-dir" in output
     assert "--pattern" in output
     assert "--skip-existing" in output
+    assert "--segment-size" in output
 
 
 # ── config subcommand ─────────────────────────────────────

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
 
 logger = logging.getLogger(__name__)
 
@@ -229,3 +230,174 @@ def write_frames_as_png(
 
     logger.info("Saved %d PNGs to %s", t, output_dir)
     return t
+
+
+def compute_segments(total_frames: int, segment_size: int) -> list[tuple[int, int]]:
+    """Divide total_frames into segment ranges respecting 4n+1 boundaries.
+
+    Args:
+        total_frames: Total number of frames in the video.
+        segment_size: Maximum frames per segment (must follow 4n+1 rule).
+
+    Returns:
+        List of (start_frame, end_frame) tuples. end_frame is exclusive.
+    """
+    if total_frames <= 0:
+        return []
+    segments = []
+    start = 0
+    while start < total_frames:
+        end = min(start + segment_size, total_frames)
+        segments.append((start, end))
+        start = end
+    return segments
+
+
+def read_video_segment(
+    path: Path,
+    start_frame: int,
+    end_frame: int,
+) -> tuple:
+    """Read a range of frames from a video file.
+
+    Args:
+        path: Path to video file.
+        start_frame: First frame index (inclusive).
+        end_frame: Last frame index (exclusive).
+
+    Returns:
+        Tuple of (frames_tensor, video_meta).
+        Tensor shape: [T, H, W, C], dtype float32, range [0, 1], RGB.
+
+    Raises:
+        FileNotFoundError: If video doesn't exist.
+        ValueError: If video can't be opened or range yields no frames.
+    """
+    import cv2
+    import numpy as np
+    import torch
+
+    meta = get_video_meta(path)
+    cap = cv2.VideoCapture(str(path))
+
+    try:
+        if start_frame > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        count = end_frame - start_frame
+        frames = []
+        for _ in range(count):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_rgb = (
+                cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            )
+            frames.append(frame_rgb)
+    finally:
+        cap.release()
+
+    if not frames:
+        msg = f"No frames read from {path} (range {start_frame}:{end_frame})"
+        raise ValueError(msg)
+
+    tensor = torch.from_numpy(np.stack(frames)).to(torch.float32)
+    logger.info(
+        "Read segment [%d:%d] (%d frames) from %s",
+        start_frame,
+        end_frame,
+        len(frames),
+        path,
+    )
+    return tensor, meta
+
+
+class StreamingVideoWriter:
+    """Context manager that keeps a cv2.VideoWriter open across segments."""
+
+    def __init__(self, output_path: Path, fps: float, width: int, height: int) -> None:
+        self._output_path = output_path
+        self._fps = fps
+        self._width = width
+        self._height = height
+        self._writer = None
+        self._frame_count = 0
+
+    def __enter__(self) -> StreamingVideoWriter:
+        import cv2
+
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        self._writer = cv2.VideoWriter(
+            str(self._output_path), fourcc, self._fps, (self._width, self._height)
+        )
+        if not self._writer.isOpened():
+            msg = f"Cannot create video writer for: {self._output_path}"
+            raise ValueError(msg)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if self._writer is not None:
+            self._writer.release()
+            self._writer = None
+        logger.info("Wrote %d frames to %s", self._frame_count, self._output_path)
+
+    def write_tensor(self, frames_tensor: object) -> None:
+        """Append frames from a [T, H, W, C] float32 [0,1] RGB tensor."""
+        import cv2
+        import numpy as np
+
+        t = frames_tensor.shape[0]
+        for i in range(t):
+            frame_np = (frames_tensor[i].cpu().numpy() * 255.0).astype(np.uint8)
+            frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+            self._writer.write(frame_bgr)
+        self._frame_count += t
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+
+class StreamingPngWriter:
+    """Context manager that writes PNGs with a global frame counter across segments."""
+
+    def __init__(self, output_dir: Path, base_name: str = "frame") -> None:
+        self._output_dir = output_dir
+        self._base_name = base_name
+        self._frame_count = 0
+
+    def __enter__(self) -> StreamingPngWriter:
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        logger.info("Saved %d PNGs to %s", self._frame_count, self._output_dir)
+
+    def write_tensor(self, frames_tensor: object) -> None:
+        """Append frames as individual PNGs."""
+        import cv2
+        import numpy as np
+
+        t = frames_tensor.shape[0]
+        for i in range(t):
+            filename = f"{self._base_name}_{self._frame_count:06d}.png"
+            filepath = self._output_dir / filename
+            frame_np = (frames_tensor[i].cpu().numpy() * 255.0).astype(np.uint8)
+            frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(filepath), frame_bgr)
+            self._frame_count += 1
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count

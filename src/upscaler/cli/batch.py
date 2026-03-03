@@ -49,6 +49,13 @@ def batch(
         str | None,
         typer.Option("--preset", help="Hardware preset."),
     ] = None,
+    segment_size: Annotated[
+        int | None,
+        typer.Option(
+            "--segment-size",
+            help="Frames per segment for streaming processing (must follow 4n+1 rule).",
+        ),
+    ] = None,
 ) -> None:
     """Batch upscale all videos in a directory."""
     console = Console()
@@ -69,6 +76,8 @@ def batch(
     cli_overrides: dict = {}
     if model is not None:
         cli_overrides["model"] = model
+    if segment_size is not None:
+        cli_overrides["segment_size"] = segment_size
 
     console.print(f"Found [bold]{len(videos)}[/bold] video(s) to process.")
 

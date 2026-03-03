@@ -16,6 +16,7 @@ def get_defaults() -> dict:
         "cuda_device": "0",
         "skip_first_frames": 0,
         "max_frames": None,
+        "segment_size": None,
         "color_correction": False,
         "block_swap": {
             "blocks_to_swap": 20,

@@ -55,6 +55,13 @@ def upscale(
         str | None,
         typer.Option("--output-format", help="Output format: video or png."),
     ] = None,
+    segment_size: Annotated[
+        int | None,
+        typer.Option(
+            "--segment-size",
+            help="Frames per segment for streaming processing (must follow 4n+1 rule).",
+        ),
+    ] = None,
 ) -> None:
     """Upscale a single video to 4K resolution."""
     try:
@@ -80,6 +87,8 @@ def upscale(
         cli_overrides["max_frames"] = max_frames
     if output_format is not None:
         cli_overrides["output_format"] = output_format
+    if segment_size is not None:
+        cli_overrides["segment_size"] = segment_size
 
     try:
         cfg = resolve_config(

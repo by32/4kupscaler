@@ -68,6 +68,16 @@ class UpscaleConfig(BaseModel):
     skip_first_frames: int = Field(default=0, ge=0)
     max_frames: int | None = Field(default=None, gt=0)
 
+    # Segmented processing
+    segment_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Frames per segment for streaming processing"
+            " (must follow 4n+1 rule). None = single pass."
+        ),
+    )
+
     # Color
     color_correction: bool = False
 
@@ -79,6 +89,18 @@ class UpscaleConfig(BaseModel):
             msg = (
                 f"batch_size must follow 4n+1 rule "
                 f"(valid: {valid}), got {self.batch_size}"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_segment_size_rule(self) -> UpscaleConfig:
+        """Ensure segment_size follows the 4n+1 pattern when set."""
+        if self.segment_size is not None and (self.segment_size - 1) % 4 != 0:
+            valid = [4 * n + 1 for n in range(6)]
+            msg = (
+                f"segment_size must follow 4n+1 rule "
+                f"(valid: {valid}), got {self.segment_size}"
             )
             raise ValueError(msg)
         return self

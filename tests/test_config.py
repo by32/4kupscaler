@@ -74,6 +74,26 @@ class TestUpscaleConfig:
         )
         assert config.block_swap.blocks_to_swap == 35
 
+    def test_segment_size_default_none(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        config = UpscaleConfig(input=video)
+        assert config.segment_size is None
+
+    def test_valid_segment_sizes(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        for size in [1, 5, 9, 13, 17, 21]:
+            config = UpscaleConfig(input=video, segment_size=size)
+            assert config.segment_size == size
+
+    def test_invalid_segment_size(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        for size in [2, 3, 4, 6, 7, 8, 10]:
+            with pytest.raises(ValueError, match="4n\\+1"):
+                UpscaleConfig(input=video, segment_size=size)
+
     def test_invalid_output_format(self, tmp_path: Path) -> None:
         video = tmp_path / "test.mp4"
         video.touch()

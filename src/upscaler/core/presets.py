@@ -13,6 +13,7 @@ PRESETS: dict[str, dict] = {
         "blocks_to_swap": 20,
         "preserve_vram": True,
         "resolution": 1072,
+        "segment_size": 5,
     },
     "rtx3090": {
         "model": "3b-fp8",
@@ -20,6 +21,7 @@ PRESETS: dict[str, dict] = {
         "blocks_to_swap": 12,
         "preserve_vram": True,
         "resolution": 1072,
+        "segment_size": 13,
     },
     "rtx4090": {
         "model": "7b-fp8",
@@ -27,6 +29,7 @@ PRESETS: dict[str, dict] = {
         "blocks_to_swap": 8,
         "preserve_vram": False,
         "resolution": 1072,
+        "segment_size": 21,
     },
 }
 
