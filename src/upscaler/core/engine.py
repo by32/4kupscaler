@@ -204,24 +204,10 @@ class UpscaleEngine:
         output_path = cfg.output
         assert output_path is not None
 
-        # Step 4: Open streaming writer and process each segment
-        # Compute output resolution — we need the upscaled dimensions.
-        # The short side is cfg.resolution, compute the long side proportionally.
-        scale = cfg.resolution / min(meta.width, meta.height)
-        out_h = round(meta.height * scale)
-        out_w = round(meta.width * scale)
-        # Ensure even dimensions for video codec
-        out_h = out_h + (out_h % 2)
-        out_w = out_w + (out_w % 2)
-
-        if cfg.output_format == "png":
-            writer_ctx = StreamingPngWriter(output_path)
-        else:
-            writer_ctx = StreamingVideoWriter(
-                output_path, fps=meta.fps, width=out_w, height=out_h
-            )
-
-        with writer_ctx as writer:
+        # Step 4: Process each segment, creating writer lazily after first
+        # segment so we know the actual output dimensions from inference.
+        writer = None
+        try:
             for seg_idx, (seg_start, seg_end) in enumerate(segments):
                 abs_start = skip_frames + seg_start
                 abs_end = skip_frames + seg_end
@@ -249,6 +235,20 @@ class UpscaleEngine:
                 if pad_count > 0:
                     result = result[:-pad_count]
 
+                # Create writer lazily using actual output dimensions
+                if writer is None:
+                    _, out_h, out_w, _ = result.shape
+                    if cfg.output_format == "png":
+                        writer = StreamingPngWriter(output_path)
+                    else:
+                        writer = StreamingVideoWriter(
+                            output_path,
+                            fps=meta.fps,
+                            width=out_w,
+                            height=out_h,
+                        )
+                    writer.__enter__()
+
                 # Stream to writer
                 writer.write_tensor(result)
 
@@ -263,6 +263,9 @@ class UpscaleEngine:
                         torch.cuda.empty_cache()
                 except ImportError:
                     pass
+        finally:
+            if writer is not None:
+                writer.__exit__(None, None, None)
 
         logger.info("Done! Output: %s", output_path)
         return output_path
