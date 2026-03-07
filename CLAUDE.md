@@ -37,11 +37,16 @@ src/upscaler/
 - **Default model:** `3b-fp8` (7B available via `--model 7b-fp8` but much slower)
 - **BlockSwap:** `blocks_to_swap=20` offloads transformer blocks to CPU
 - **Batch size:** Must follow `4n+1` rule (1, 5, 9, 13...). Default is 1 for VRAM safety
-- **VAE tiling:** 512×512 tiles with 160px overlap, mandatory for 4K output
+- **VAE tiling:** 512×512 tiles with 160px overlap, auto-enabled for `--resolution 2160` (configurable via `--vae-tiling` flag or `[performance.vae_tiling]` in TOML)
 
 ## Key Design Rules
 
-- All inference MUST use BlockSwap + VAE tiling on RTX 3080 — never bypass
+- All 4K inference MUST use BlockSwap + VAE tiling on RTX 3080 — never bypass. Use `--preset rtx3080-4k` or `--resolution 2160` (auto-enables tiling)
 - Frame counts must satisfy `frames % 4 == 1` (enforced by `enforce_4n1()` in `core/video_io.py`)
 - Coverage excludes `_vendor/` — only measure our wrapper code
 - GPU-dependent tests use `@pytest.mark.gpu` and auto-skip on Mac
+
+## Verbosity
+
+- `-v` (INFO): Use for production runs — shows segment progress, timing, and ETA
+- `-vv` (DEBUG): Extremely verbose — dumps per-block swap times, VRAM stats per phase, tensor shapes. Generates thousands of log lines per segment. Only use for debugging single segments, never for multi-hour runs

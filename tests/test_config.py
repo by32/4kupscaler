@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from upscaler.config.schema import BlockSwapConfig, UpscaleConfig
+from upscaler.config.schema import BlockSwapConfig, UpscaleConfig, VAETilingConfig
 
 
 class TestBlockSwapConfig:
@@ -99,3 +99,96 @@ class TestUpscaleConfig:
         video.touch()
         with pytest.raises(ValueError):
             UpscaleConfig(input=video, output_format="gif")
+
+
+class TestVAETilingConfig:
+    def test_defaults(self) -> None:
+        cfg = VAETilingConfig()
+        assert cfg.encode_tiled is False
+        assert cfg.decode_tiled is False
+        assert cfg.encode_tile_size == 512
+        assert cfg.encode_tile_overlap == 160
+        assert cfg.decode_tile_size == 512
+        assert cfg.decode_tile_overlap == 160
+
+    def test_encode_overlap_must_be_less_than_tile_size(self) -> None:
+        with pytest.raises(ValueError, match="encode_tile_overlap"):
+            VAETilingConfig(
+                encode_tiled=True,
+                encode_tile_size=256,
+                encode_tile_overlap=256,
+            )
+
+    def test_decode_overlap_must_be_less_than_tile_size(self) -> None:
+        with pytest.raises(ValueError, match="decode_tile_overlap"):
+            VAETilingConfig(
+                decode_tiled=True,
+                decode_tile_size=256,
+                decode_tile_overlap=300,
+            )
+
+    def test_overlap_validation_skipped_when_tiling_disabled(self) -> None:
+        cfg = VAETilingConfig(
+            encode_tiled=False,
+            encode_tile_size=256,
+            encode_tile_overlap=300,
+        )
+        assert cfg.encode_tile_overlap == 300
+
+
+class TestAutoEnableTiling:
+    def test_auto_enabled_at_2160(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        cfg = UpscaleConfig(input=video, resolution=2160)
+        assert cfg.vae_tiling.encode_tiled is True
+        assert cfg.vae_tiling.decode_tiled is True
+
+    def test_auto_enabled_at_1440(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        cfg = UpscaleConfig(input=video, resolution=1440)
+        assert cfg.vae_tiling.encode_tiled is True
+        assert cfg.vae_tiling.decode_tiled is True
+
+    def test_not_auto_enabled_at_1080(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        cfg = UpscaleConfig(input=video, resolution=1080)
+        assert cfg.vae_tiling.encode_tiled is False
+        assert cfg.vae_tiling.decode_tiled is False
+
+    def test_not_auto_enabled_at_1072(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        cfg = UpscaleConfig(input=video, resolution=1072)
+        assert cfg.vae_tiling.encode_tiled is False
+        assert cfg.vae_tiling.decode_tiled is False
+
+    def test_explicit_tiling_preserved_at_low_res(self, tmp_path: Path) -> None:
+        video = tmp_path / "test.mp4"
+        video.touch()
+        cfg = UpscaleConfig(
+            input=video,
+            resolution=720,
+            vae_tiling=VAETilingConfig(encode_tiled=True, decode_tiled=True),
+        )
+        assert cfg.vae_tiling.encode_tiled is True
+        assert cfg.vae_tiling.decode_tiled is True
+
+
+class TestPresetVAETiling:
+    def test_rtx3080_4k_has_tiling(self) -> None:
+        from upscaler.core.presets import get_preset
+
+        preset = get_preset("rtx3080-4k")
+        assert preset["vae_tiling"]["encode_tiled"] is True
+        assert preset["vae_tiling"]["decode_tiled"] is True
+        assert preset["resolution"] == 2160
+
+    def test_rtx3080_no_tiling(self) -> None:
+        from upscaler.core.presets import get_preset
+
+        preset = get_preset("rtx3080")
+        assert "vae_tiling" not in preset
+        assert preset["resolution"] == 1072

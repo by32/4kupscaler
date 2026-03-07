@@ -48,6 +48,8 @@ def load_toml(path: Path) -> dict:
     for key, value in perf.items():
         if key == "block_swap":
             result["block_swap"] = dict(value)
+        elif key == "vae_tiling":
+            result["vae_tiling"] = dict(value)
         else:
             field = _TOML_FIELD_MAP.get(key, key)
             result[field] = value
@@ -77,6 +79,10 @@ def merge_config(
             bs = dict(merged.get("block_swap", {}))
             bs["blocks_to_swap"] = preset_values.pop("blocks_to_swap")
             merged["block_swap"] = bs
+        if "vae_tiling" in preset_values:
+            vt = dict(merged.get("vae_tiling", {}))
+            vt.update(preset_values.pop("vae_tiling"))
+            merged["vae_tiling"] = vt
         merged.update(preset_values)
 
     if config_path:
@@ -86,6 +92,10 @@ def merge_config(
             bs = dict(merged.get("block_swap", {}))
             bs.update(toml_values.pop("block_swap"))
             merged["block_swap"] = bs
+        if "vae_tiling" in toml_values:
+            vt = dict(merged.get("vae_tiling", {}))
+            vt.update(toml_values.pop("vae_tiling"))
+            merged["vae_tiling"] = vt
         merged.update(toml_values)
 
     if cli_overrides:
@@ -95,6 +105,10 @@ def merge_config(
             bs = dict(merged.get("block_swap", {}))
             bs.update(overrides.pop("block_swap"))
             merged["block_swap"] = bs
+        if "vae_tiling" in overrides:
+            vt = dict(merged.get("vae_tiling", {}))
+            vt.update(overrides.pop("vae_tiling"))
+            merged["vae_tiling"] = vt
         merged.update(overrides)
 
     return merged

@@ -21,6 +21,34 @@ class BlockSwapConfig(BaseModel):
     cache_model: bool = False
 
 
+class VAETilingConfig(BaseModel):
+    """VAE tiling settings for 4K output."""
+
+    encode_tiled: bool = False
+    encode_tile_size: int = Field(default=512, gt=0)
+    encode_tile_overlap: int = Field(default=160, ge=0)
+    decode_tiled: bool = False
+    decode_tile_size: int = Field(default=512, gt=0)
+    decode_tile_overlap: int = Field(default=160, ge=0)
+
+    @model_validator(mode="after")
+    def validate_overlap_less_than_tile(self) -> VAETilingConfig:
+        """Ensure overlap is less than tile size when tiling is enabled."""
+        if self.encode_tiled and self.encode_tile_overlap >= self.encode_tile_size:
+            msg = (
+                f"encode_tile_overlap ({self.encode_tile_overlap}) "
+                f"must be < encode_tile_size ({self.encode_tile_size})"
+            )
+            raise ValueError(msg)
+        if self.decode_tiled and self.decode_tile_overlap >= self.decode_tile_size:
+            msg = (
+                f"decode_tile_overlap ({self.decode_tile_overlap}) "
+                f"must be < decode_tile_size ({self.decode_tile_size})"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class UpscaleConfig(BaseModel):
     """Full configuration for an upscale job."""
 
@@ -62,6 +90,7 @@ class UpscaleConfig(BaseModel):
         description="Unload unused models during processing to save VRAM.",
     )
     block_swap: BlockSwapConfig = Field(default_factory=BlockSwapConfig)
+    vae_tiling: VAETilingConfig = Field(default_factory=VAETilingConfig)
     cuda_device: str = Field(default="0")
 
     # Video processing
@@ -127,4 +156,12 @@ class UpscaleConfig(BaseModel):
                 self.output = self.input.parent / f"{stem}_upscaled{suffix}"
             else:
                 self.output = self.input.parent / f"{stem}_upscaled"
+        return self
+
+    @model_validator(mode="after")
+    def auto_enable_tiling(self) -> UpscaleConfig:
+        """Auto-enable VAE tiling for resolutions above 1080."""
+        if self.resolution > 1080 and not self.vae_tiling.encode_tiled:
+            self.vae_tiling.encode_tiled = True
+            self.vae_tiling.decode_tiled = True
         return self

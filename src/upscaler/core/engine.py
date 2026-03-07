@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -40,6 +41,18 @@ ProgressCallback = Callable[[int, int, str], None]
 """Callback signature: (current_step, total_steps, phase_name)"""
 
 
+def _format_duration(seconds: float) -> str:
+    """Format seconds into a human-readable duration string."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
 class UpscaleEngine:
     """Orchestrates the full upscale pipeline.
 
@@ -54,11 +67,16 @@ class UpscaleEngine:
         self._runner = None
         self._ctx = None
 
-    def run(self, progress_callback: ProgressCallback | None = None) -> Path:
+    def run(
+        self,
+        progress_callback: ProgressCallback | None = None,
+        reporter: object | None = None,
+    ) -> Path:
         """Run the full upscale pipeline.
 
         Args:
             progress_callback: Optional callback for progress reporting.
+            reporter: Optional ProgressReporter for segment-level progress.
 
         Returns:
             Path to the output file/directory.
@@ -67,6 +85,7 @@ class UpscaleEngine:
             skip_frames=self.config.skip_first_frames,
             max_frames=self.config.max_frames,
             progress_callback=progress_callback,
+            reporter=reporter,
         )
 
     def preview(
@@ -102,6 +121,7 @@ class UpscaleEngine:
         skip_frames: int = 0,
         max_frames: int | None = None,
         progress_callback: ProgressCallback | None = None,
+        reporter: object | None = None,
     ) -> Path:
         """Internal processing pipeline — routes to single-pass or segmented."""
         cfg = self.config
@@ -114,6 +134,7 @@ class UpscaleEngine:
                 return self._process_segmented(
                     skip_frames=skip_frames,
                     progress_callback=progress_callback,
+                    reporter=reporter,
                 )
 
         return self._process_single_pass(
@@ -175,6 +196,7 @@ class UpscaleEngine:
         self,
         skip_frames: int = 0,
         progress_callback: ProgressCallback | None = None,
+        reporter: object | None = None,
     ) -> Path:
         """Segmented pipeline: process video in chunks, streaming output to disk."""
         cfg = self.config
@@ -190,10 +212,11 @@ class UpscaleEngine:
         meta = get_video_meta(cfg.input)
         effective_frames = meta.frame_count - skip_frames
         segments = compute_segments(effective_frames, segment_size)
+        total_segments = len(segments)
         logger.info(
             "Segmented processing: %d frames in %d segments (size=%d)",
             effective_frames,
-            len(segments),
+            total_segments,
             segment_size,
         )
 
@@ -204,9 +227,15 @@ class UpscaleEngine:
         output_path = cfg.output
         assert output_path is not None
 
+        # Notify reporter of segmented mode
+        if reporter is not None and hasattr(reporter, "start_segmented"):
+            reporter.start_segmented(total_segments)
+
         # Step 4: Process each segment, creating writer lazily after first
         # segment so we know the actual output dimensions from inference.
         writer = None
+        segment_times: list[float] = []
+        run_t0 = time.monotonic()
         try:
             for seg_idx, (seg_start, seg_end) in enumerate(segments):
                 abs_start = skip_frames + seg_start
@@ -214,10 +243,15 @@ class UpscaleEngine:
                 logger.info(
                     "Segment %d/%d: frames [%d:%d]",
                     seg_idx + 1,
-                    len(segments),
+                    total_segments,
                     abs_start,
                     abs_end,
                 )
+
+                if reporter is not None and hasattr(reporter, "begin_segment"):
+                    reporter.begin_segment(seg_idx)
+
+                seg_t0 = time.monotonic()
 
                 # Read segment frames
                 frames, _ = read_video_segment(cfg.input, abs_start, abs_end)
@@ -263,11 +297,35 @@ class UpscaleEngine:
                         torch.cuda.empty_cache()
                 except ImportError:
                     pass
+
+                # Segment timing
+                seg_elapsed = time.monotonic() - seg_t0
+                segment_times.append(seg_elapsed)
+                avg_time = sum(segment_times) / len(segment_times)
+                remaining = total_segments - (seg_idx + 1)
+                eta = avg_time * remaining
+                logger.info(
+                    "Segment %d/%d complete [%s, avg %s/seg, ETA %s]",
+                    seg_idx + 1,
+                    total_segments,
+                    _format_duration(seg_elapsed),
+                    _format_duration(avg_time),
+                    _format_duration(eta),
+                )
+
+                if reporter is not None and hasattr(reporter, "end_segment"):
+                    reporter.end_segment()
         finally:
             if writer is not None:
                 writer.__exit__(None, None, None)
 
-        logger.info("Done! Output: %s", output_path)
+        total_elapsed = time.monotonic() - run_t0
+        logger.info(
+            "Done! Output: %s (total: %s, %d segments)",
+            output_path,
+            _format_duration(total_elapsed),
+            total_segments,
+        )
         return output_path
 
     def _ensure_models_loaded(self, model_dir: Path, filename: str) -> None:
@@ -300,6 +358,7 @@ class UpscaleEngine:
             "swap_io_components": cfg.block_swap.offload_io_components,
         }
 
+        vt = cfg.vae_tiling
         runner, cache_context = prepare_runner(
             dit_model=filename,
             vae_model=VAE_FILENAME,
@@ -307,6 +366,12 @@ class UpscaleEngine:
             debug=debug,
             ctx=ctx,
             block_swap_config=block_swap_cfg,
+            encode_tiled=vt.encode_tiled,
+            encode_tile_size=(vt.encode_tile_size,) * 2,
+            encode_tile_overlap=(vt.encode_tile_overlap,) * 2,
+            decode_tiled=vt.decode_tiled,
+            decode_tile_size=(vt.decode_tile_size,) * 2,
+            decode_tile_overlap=(vt.decode_tile_overlap,) * 2,
         )
 
         script_dir = get_script_directory()
@@ -319,6 +384,17 @@ class UpscaleEngine:
         self._base_ctx = ctx
         self._text_embeds = text_embeds
         self._debug = debug
+
+    @staticmethod
+    def _clear_vram() -> None:
+        """Release cached VRAM between inference phases."""
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
     def _run_inference_cached(
         self,
@@ -354,6 +430,9 @@ class UpscaleEngine:
             resolution=cfg.resolution,
         )
 
+        # Clear VRAM between encode → upscale
+        self._clear_vram()
+
         # Phase 2: Upscale (cache_model=True to keep DiT for next segment)
         if progress_callback:
             progress_callback(2, 4, "Upscaling")
@@ -364,6 +443,9 @@ class UpscaleEngine:
             seed=cfg.seed,
             cache_model=True,
         )
+
+        # Clear VRAM between upscale → decode (critical for consistent VAE perf)
+        self._clear_vram()
 
         # Phase 3: Decode (cache_model=True to keep VAE for next segment)
         if progress_callback:
@@ -437,6 +519,7 @@ class UpscaleEngine:
         }
 
         # Prepare runner (loads models)
+        vt = cfg.vae_tiling
         runner, cache_context = prepare_runner(
             dit_model=filename,
             vae_model=VAE_FILENAME,
@@ -444,6 +527,12 @@ class UpscaleEngine:
             debug=debug,
             ctx=ctx,
             block_swap_config=block_swap_cfg,
+            encode_tiled=vt.encode_tiled,
+            encode_tile_size=(vt.encode_tile_size,) * 2,
+            encode_tile_overlap=(vt.encode_tile_overlap,) * 2,
+            decode_tiled=vt.decode_tiled,
+            decode_tile_size=(vt.decode_tile_size,) * 2,
+            decode_tile_overlap=(vt.decode_tile_overlap,) * 2,
         )
         ctx["cache_context"] = cache_context
 

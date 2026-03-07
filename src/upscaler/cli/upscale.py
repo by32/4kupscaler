@@ -62,6 +62,13 @@ def upscale(
             help="Frames per segment for streaming processing (must follow 4n+1 rule).",
         ),
     ] = None,
+    vae_tiling: Annotated[
+        bool | None,
+        typer.Option(
+            "--vae-tiling",
+            help="Enable VAE tiling (auto-enabled for resolutions > 1080).",
+        ),
+    ] = None,
 ) -> None:
     """Upscale a single video to 4K resolution."""
     try:
@@ -89,6 +96,8 @@ def upscale(
         cli_overrides["output_format"] = output_format
     if segment_size is not None:
         cli_overrides["segment_size"] = segment_size
+    if vae_tiling is not None and vae_tiling:
+        cli_overrides["vae_tiling"] = {"encode_tiled": True, "decode_tiled": True}
 
     try:
         cfg = resolve_config(
@@ -104,5 +113,5 @@ def upscale(
 
     reporter = ProgressReporter()
     engine = UpscaleEngine(cfg)
-    result_path = engine.run(progress_callback=reporter.callback)
+    result_path = engine.run(progress_callback=reporter.callback, reporter=reporter)
     reporter.complete(result_path)
