@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from upscaler import __version__
-from upscaler.cli import config_cmd
+from upscaler.cli import cloud, config_cmd
 from upscaler.cli.batch import batch
 from upscaler.cli.preview import preview
 from upscaler.cli.upscale import upscale
@@ -63,3 +63,4 @@ app.command(name="upscale", help="Upscale a single video to 4K.")(upscale)
 app.command(name="preview", help="Preview upscale on a few frames.")(preview)
 app.command(name="batch", help="Batch upscale a directory of videos.")(batch)
 app.add_typer(config_cmd.app, name="config", help="Manage configuration.")
+app.add_typer(cloud.app, name="cloud", help="Run jobs on vast.ai cloud GPUs.")

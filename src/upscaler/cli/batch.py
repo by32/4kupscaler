@@ -56,6 +56,13 @@ def batch(
             help="Frames per segment for streaming processing (must follow 4n+1 rule).",
         ),
     ] = None,
+    gpu_monitor: Annotated[
+        bool | None,
+        typer.Option(
+            "--gpu-monitor/--no-gpu-monitor",
+            help="Enable GPU temperature monitoring during processing.",
+        ),
+    ] = None,
 ) -> None:
     """Batch upscale all videos in a directory."""
     console = Console()
@@ -78,35 +85,60 @@ def batch(
         cli_overrides["model"] = model
     if segment_size is not None:
         cli_overrides["segment_size"] = segment_size
+    if gpu_monitor is not None:
+        cli_overrides["gpu_monitor"] = {"enabled": gpu_monitor}
 
     console.print(f"Found [bold]{len(videos)}[/bold] video(s) to process.")
 
-    for i, video_path in enumerate(videos, 1):
-        output_path = None
-        if out_dir:
-            output_path = out_dir / f"{video_path.stem}_upscaled.mp4"
+    # GPU monitoring setup (shared across all videos)
+    monitor = None
+    first_cfg_checked = False
 
-        if skip_existing and output_path and output_path.exists():
-            console.print(f"  [{i}/{len(videos)}] Skipping (exists): {video_path.name}")
-            continue
+    try:
+        for i, video_path in enumerate(videos, 1):
+            output_path = None
+            if out_dir:
+                output_path = out_dir / f"{video_path.stem}_upscaled.mp4"
 
-        console.print(f"  [{i}/{len(videos)}] Processing: {video_path.name}")
+            if skip_existing and output_path and output_path.exists():
+                console.print(
+                    f"  [{i}/{len(videos)}] Skipping (exists): {video_path.name}"
+                )
+                continue
 
-        try:
-            cfg = resolve_config(
-                input_path=video_path,
-                output=output_path,
-                preset=preset,
-                config_path=Path(config) if config else None,
-                **cli_overrides,
-            )
-        except (ValueError, ValidationError) as exc:
-            print_error(f"{video_path.name}: {exc}")
-            continue
+            console.print(f"  [{i}/{len(videos)}] Processing: {video_path.name}")
 
-        reporter = ProgressReporter(console=console)
-        engine = UpscaleEngine(cfg)
-        result = engine.run(progress_callback=reporter.callback)
-        reporter.complete(result)
+            try:
+                cfg = resolve_config(
+                    input_path=video_path,
+                    output=output_path,
+                    preset=preset,
+                    config_path=Path(config) if config else None,
+                    **cli_overrides,
+                )
+            except (ValueError, ValidationError) as exc:
+                print_error(f"{video_path.name}: {exc}")
+                continue
+
+            if not first_cfg_checked and cfg.gpu_monitor.enabled:
+                first_cfg_checked = True
+                try:
+                    from upscaler.diagnostics.gpu_monitor import GpuMonitor
+
+                    monitor = GpuMonitor(
+                        device_index=int(cfg.cuda_device),
+                        poll_interval=cfg.gpu_monitor.poll_interval,
+                    )
+                    monitor.start()
+                except Exception:
+                    pass
+
+            reporter = ProgressReporter(console=console, gpu_monitor=monitor)
+            engine = UpscaleEngine(cfg, gpu_monitor=monitor)
+            result = engine.run(progress_callback=reporter.callback, reporter=reporter)
+            reporter.complete(result)
+    finally:
+        if monitor is not None:
+            monitor.stop()
 
     console.print("[bold green]Batch processing complete.[/bold green]")

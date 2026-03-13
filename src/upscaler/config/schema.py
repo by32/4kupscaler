@@ -49,6 +49,34 @@ class VAETilingConfig(BaseModel):
         return self
 
 
+class GpuMonitorConfig(BaseModel):
+    """GPU monitoring and thermal management settings."""
+
+    enabled: bool = False
+    poll_interval: float = Field(
+        default=2.0,
+        gt=0.1,
+        le=30.0,
+        description="Seconds between GPU metric polls.",
+    )
+    warn_temp_c: int = Field(default=85, ge=50, le=100)
+    critical_temp_c: int = Field(default=90, ge=50, le=100)
+    cooldown_target_c: int = Field(default=80, ge=40, le=95)
+    pause_on_overheat: bool = True
+    log_metrics: bool = True
+
+    @model_validator(mode="after")
+    def validate_temp_ordering(self) -> GpuMonitorConfig:
+        """Ensure cooldown < warn < critical."""
+        if not (self.cooldown_target_c < self.warn_temp_c < self.critical_temp_c):
+            msg = (
+                f"Temperature ordering violated: cooldown({self.cooldown_target_c}) "
+                f"< warn({self.warn_temp_c}) < critical({self.critical_temp_c})"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class UpscaleConfig(BaseModel):
     """Full configuration for an upscale job."""
 
@@ -106,6 +134,9 @@ class UpscaleConfig(BaseModel):
             " (must follow 4n+1 rule). None = single pass."
         ),
     )
+
+    # GPU monitoring
+    gpu_monitor: GpuMonitorConfig = Field(default_factory=GpuMonitorConfig)
 
     # Color
     color_correction: bool = False

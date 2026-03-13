@@ -62,21 +62,30 @@ class UpscaleEngine:
         output_path = engine.run()
     """
 
-    def __init__(self, config: UpscaleConfig) -> None:
+    def __init__(
+        self,
+        config: UpscaleConfig,
+        gpu_monitor: object | None = None,
+        preemption_handler: object | None = None,
+    ) -> None:
         self.config = config
         self._runner = None
         self._ctx = None
+        self._gpu_monitor = gpu_monitor
+        self._preemption_handler = preemption_handler
 
     def run(
         self,
         progress_callback: ProgressCallback | None = None,
         reporter: object | None = None,
+        manifest: object | None = None,
     ) -> Path:
         """Run the full upscale pipeline.
 
         Args:
             progress_callback: Optional callback for progress reporting.
             reporter: Optional ProgressReporter for segment-level progress.
+            manifest: Optional JobManifest for checkpoint-based resume.
 
         Returns:
             Path to the output file/directory.
@@ -86,6 +95,7 @@ class UpscaleEngine:
             max_frames=self.config.max_frames,
             progress_callback=progress_callback,
             reporter=reporter,
+            manifest=manifest,
         )
 
     def preview(
@@ -122,6 +132,7 @@ class UpscaleEngine:
         max_frames: int | None = None,
         progress_callback: ProgressCallback | None = None,
         reporter: object | None = None,
+        manifest: object | None = None,
     ) -> Path:
         """Internal processing pipeline — routes to single-pass or segmented."""
         cfg = self.config
@@ -135,6 +146,7 @@ class UpscaleEngine:
                     skip_frames=skip_frames,
                     progress_callback=progress_callback,
                     reporter=reporter,
+                    manifest=manifest,
                 )
 
         return self._process_single_pass(
@@ -197,8 +209,15 @@ class UpscaleEngine:
         skip_frames: int = 0,
         progress_callback: ProgressCallback | None = None,
         reporter: object | None = None,
+        manifest: object | None = None,
     ) -> Path:
-        """Segmented pipeline: process video in chunks, streaming output to disk."""
+        """Segmented pipeline: process video in chunks, streaming output to disk.
+
+        Args:
+            manifest: Optional ``JobManifest`` for checkpoint-based resume.
+                When provided, completed segments are skipped and each segment
+                is written to a separate file for later merging.
+        """
         cfg = self.config
         segment_size = cfg.segment_size
         assert segment_size is not None
@@ -227,6 +246,12 @@ class UpscaleEngine:
         output_path = cfg.output
         assert output_path is not None
 
+        # Checkpoint mode: determine work dir for per-segment files
+        work_dir = None
+        if manifest is not None:
+            work_dir = output_path.parent / f".{output_path.stem}_segments"
+            work_dir.mkdir(parents=True, exist_ok=True)
+
         # Notify reporter of segmented mode
         if reporter is not None and hasattr(reporter, "start_segmented"):
             reporter.start_segmented(total_segments)
@@ -238,6 +263,30 @@ class UpscaleEngine:
         run_t0 = time.monotonic()
         try:
             for seg_idx, (seg_start, seg_end) in enumerate(segments):
+                # Preemption check
+                if (
+                    self._preemption_handler is not None
+                    and self._preemption_handler.is_preempted
+                ):
+                    logger.warning(
+                        "Preemption signal received — saving state and exiting."
+                    )
+                    if manifest is not None:
+                        manifest.save()
+                    break
+
+                # Skip completed segments in checkpoint mode
+                if manifest is not None:
+                    seg_status = manifest.segments[seg_idx]
+                    if seg_status.status == "completed":
+                        logger.info(
+                            "Segment %d/%d: already completed, skipping",
+                            seg_idx + 1,
+                            total_segments,
+                        )
+                        continue
+                    manifest.mark_segment_started(seg_idx)
+
                 abs_start = skip_frames + seg_start
                 abs_end = skip_frames + seg_end
                 logger.info(
@@ -269,22 +318,35 @@ class UpscaleEngine:
                 if pad_count > 0:
                     result = result[:-pad_count]
 
-                # Create writer lazily using actual output dimensions
-                if writer is None:
+                if manifest is not None and work_dir is not None:
+                    # Checkpoint mode: write each segment to its own file
+                    seg_file = work_dir / f"seg_{seg_idx:04d}.mp4"
                     _, out_h, out_w, _ = result.shape
-                    if cfg.output_format == "png":
-                        writer = StreamingPngWriter(output_path)
-                    else:
-                        writer = StreamingVideoWriter(
-                            output_path,
-                            fps=meta.fps,
-                            width=out_w,
-                            height=out_h,
-                        )
-                    writer.__enter__()
+                    with StreamingVideoWriter(
+                        seg_file, fps=meta.fps, width=out_w, height=out_h
+                    ) as seg_writer:
+                        seg_writer.write_tensor(result)
 
-                # Stream to writer
-                writer.write_tensor(result)
+                    seg_elapsed = time.monotonic() - seg_t0
+                    manifest.mark_segment_completed(
+                        seg_idx, str(seg_file.name), seg_elapsed
+                    )
+                    manifest.save()
+                else:
+                    # Streaming mode: write directly to final output
+                    if writer is None:
+                        _, out_h, out_w, _ = result.shape
+                        if cfg.output_format == "png":
+                            writer = StreamingPngWriter(output_path)
+                        else:
+                            writer = StreamingVideoWriter(
+                                output_path,
+                                fps=meta.fps,
+                                width=out_w,
+                                height=out_h,
+                            )
+                        writer.__enter__()
+                    writer.write_tensor(result)
 
                 # Free segment memory
                 del frames, result
@@ -297,6 +359,9 @@ class UpscaleEngine:
                         torch.cuda.empty_cache()
                 except ImportError:
                     pass
+
+                # Thermal check between segments
+                self._check_thermal()
 
                 # Segment timing
                 seg_elapsed = time.monotonic() - seg_t0
@@ -318,6 +383,16 @@ class UpscaleEngine:
         finally:
             if writer is not None:
                 writer.__exit__(None, None, None)
+            if manifest is not None:
+                manifest.save()
+
+        # Checkpoint mode: merge segment files into final output
+        if manifest is not None and manifest.is_complete() and work_dir is not None:
+            from upscaler.core.video_io import merge_video_segments
+
+            seg_files = sorted(work_dir.glob("seg_*.mp4"))
+            merge_video_segments(seg_files, output_path, meta.fps)
+            logger.info("Merged %d segments into %s", len(seg_files), output_path)
 
         total_elapsed = time.monotonic() - run_t0
         logger.info(
@@ -327,6 +402,41 @@ class UpscaleEngine:
             total_segments,
         )
         return output_path
+
+    def _check_thermal(self) -> None:
+        """Evaluate GPU temperature and pause if critical (between segments)."""
+        if self._gpu_monitor is None:
+            return
+        snap = self._gpu_monitor.latest()
+        if snap is None:
+            return
+
+        from upscaler.diagnostics.thermal import (
+            ThermalAction,
+            ThermalPolicy,
+            evaluate,
+            wait_for_cooldown,
+        )
+
+        cfg = self.config.gpu_monitor
+        policy = ThermalPolicy(
+            warn_temp_c=cfg.warn_temp_c,
+            critical_temp_c=cfg.critical_temp_c,
+            cooldown_target_c=cfg.cooldown_target_c,
+        )
+        action = evaluate(snap, policy)
+        if action == ThermalAction.WARN:
+            logger.warning(
+                "GPU temp %d\u00b0C exceeds warning threshold (%d\u00b0C)",
+                snap.temperature_c,
+                cfg.warn_temp_c,
+            )
+        elif action == ThermalAction.PAUSE and cfg.pause_on_overheat:
+            logger.warning(
+                "GPU temp %d\u00b0C critical — pausing for cooldown",
+                snap.temperature_c,
+            )
+            wait_for_cooldown(self._gpu_monitor, policy, logger)
 
     def _ensure_models_loaded(self, model_dir: Path, filename: str) -> None:
         """Load models once, caching runner and text embeddings for reuse."""

@@ -27,11 +27,15 @@ gpu = [
     "safetensors",
     "mediapy",
     "psutil",
+    "pynvml>=11.5",
     "diffusers",
     "tqdm",
     "rotary-embedding-torch",
     "numpy",
     "Pillow",
+]
+cloud = [
+    "vastai>=0.1",
 ]
 
 [dependency-groups]

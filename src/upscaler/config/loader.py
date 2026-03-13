@@ -54,6 +54,9 @@ def load_toml(path: Path) -> dict:
             field = _TOML_FIELD_MAP.get(key, key)
             result[field] = value
 
+    if "gpu_monitor" in raw:
+        result["gpu_monitor"] = dict(raw["gpu_monitor"])
+
     return result
 
 
@@ -72,6 +75,17 @@ def merge_config(
     """
     merged = get_defaults()
 
+    # Nested dict keys that should be merged, not replaced.
+    _NESTED_KEYS = ("block_swap", "vae_tiling", "gpu_monitor")
+
+    def _merge_layer(base: dict, layer: dict) -> None:
+        for nk in _NESTED_KEYS:
+            if nk in layer:
+                nested = dict(base.get(nk, {}))
+                nested.update(layer.pop(nk))
+                base[nk] = nested
+        base.update(layer)
+
     if preset:
         preset_values = get_preset(preset)
         # Presets may include blocks_to_swap at top level — nest it.
@@ -79,36 +93,15 @@ def merge_config(
             bs = dict(merged.get("block_swap", {}))
             bs["blocks_to_swap"] = preset_values.pop("blocks_to_swap")
             merged["block_swap"] = bs
-        if "vae_tiling" in preset_values:
-            vt = dict(merged.get("vae_tiling", {}))
-            vt.update(preset_values.pop("vae_tiling"))
-            merged["vae_tiling"] = vt
-        merged.update(preset_values)
+        _merge_layer(merged, preset_values)
 
     if config_path:
         toml_values = load_toml(config_path)
-        # Merge block_swap dicts instead of replacing.
-        if "block_swap" in toml_values:
-            bs = dict(merged.get("block_swap", {}))
-            bs.update(toml_values.pop("block_swap"))
-            merged["block_swap"] = bs
-        if "vae_tiling" in toml_values:
-            vt = dict(merged.get("vae_tiling", {}))
-            vt.update(toml_values.pop("vae_tiling"))
-            merged["vae_tiling"] = vt
-        merged.update(toml_values)
+        _merge_layer(merged, toml_values)
 
     if cli_overrides:
         # Filter out None values so unset CLI args don't clobber.
         overrides = {k: v for k, v in cli_overrides.items() if v is not None}
-        if "block_swap" in overrides:
-            bs = dict(merged.get("block_swap", {}))
-            bs.update(overrides.pop("block_swap"))
-            merged["block_swap"] = bs
-        if "vae_tiling" in overrides:
-            vt = dict(merged.get("vae_tiling", {}))
-            vt.update(overrides.pop("vae_tiling"))
-            merged["vae_tiling"] = vt
-        merged.update(overrides)
+        _merge_layer(merged, overrides)
 
     return merged

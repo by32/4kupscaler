@@ -401,3 +401,53 @@ class StreamingPngWriter:
     @property
     def frame_count(self) -> int:
         return self._frame_count
+
+
+def merge_video_segments(
+    segment_paths: list[Path],
+    output_path: Path,
+    fps: float,
+) -> None:
+    """Concatenate multiple video segment files into one output.
+
+    Reads each segment file via cv2 and streams frames into a single
+    output file.
+    """
+    import cv2
+
+    if not segment_paths:
+        return
+
+    # Determine output dimensions from the first segment
+    cap = cv2.VideoCapture(str(segment_paths[0]))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height),
+    )
+
+    total_frames = 0
+    try:
+        for seg_path in segment_paths:
+            cap = cv2.VideoCapture(str(seg_path))
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                writer.write(frame)
+                total_frames += 1
+            cap.release()
+    finally:
+        writer.release()
+
+    logger.info(
+        "Merged %d segments (%d frames) into %s",
+        len(segment_paths),
+        total_frames,
+        output_path,
+    )

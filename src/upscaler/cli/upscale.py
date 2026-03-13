@@ -69,6 +69,27 @@ def upscale(
             help="Enable VAE tiling (auto-enabled for resolutions > 1080).",
         ),
     ] = None,
+    gpu_monitor: Annotated[
+        bool | None,
+        typer.Option(
+            "--gpu-monitor/--no-gpu-monitor",
+            help="Enable GPU temperature monitoring during processing.",
+        ),
+    ] = None,
+    checkpoint: Annotated[
+        bool,
+        typer.Option(
+            "--checkpoint/--no-checkpoint",
+            help="Enable checkpointing for resumable segmented runs.",
+        ),
+    ] = False,
+    resume: Annotated[
+        str | None,
+        typer.Option(
+            "--resume",
+            help="Resume a previously interrupted job from its work directory.",
+        ),
+    ] = None,
 ) -> None:
     """Upscale a single video to 4K resolution."""
     try:
@@ -98,6 +119,8 @@ def upscale(
         cli_overrides["segment_size"] = segment_size
     if vae_tiling is not None and vae_tiling:
         cli_overrides["vae_tiling"] = {"encode_tiled": True, "decode_tiled": True}
+    if gpu_monitor is not None:
+        cli_overrides["gpu_monitor"] = {"enabled": gpu_monitor}
 
     try:
         cfg = resolve_config(
@@ -111,7 +134,58 @@ def upscale(
         print_error(str(exc))
         raise typer.Exit(code=1) from None
 
-    reporter = ProgressReporter()
-    engine = UpscaleEngine(cfg)
-    result_path = engine.run(progress_callback=reporter.callback, reporter=reporter)
-    reporter.complete(result_path)
+    # GPU monitoring setup
+    monitor = None
+    if cfg.gpu_monitor.enabled:
+        try:
+            from upscaler.diagnostics.gpu_monitor import GpuMonitor
+
+            monitor = GpuMonitor(
+                device_index=int(cfg.cuda_device),
+                poll_interval=cfg.gpu_monitor.poll_interval,
+            )
+            monitor.start()
+        except Exception:
+            pass  # pynvml unavailable — monitor stays None
+
+    # Checkpoint / resume setup
+    manifest = None
+    if resume is not None:
+        from upscaler.core.checkpoint import JobManifest
+
+        manifest = JobManifest.load(Path(resume) / "manifest.json")
+    elif checkpoint and cfg.segment_size is not None:
+        from upscaler.core.checkpoint import JobManifest
+        from upscaler.core.video_io import compute_segments, get_video_meta
+
+        meta = get_video_meta(cfg.input)
+        effective = meta.frame_count - cfg.skip_first_frames
+        segments = compute_segments(effective, cfg.segment_size)
+        work_dir = (
+            cfg.output.parent / f".{cfg.output.stem}_segments"
+            if cfg.output
+            else Path(f".{cfg.input.stem}_segments")
+        )
+        work_dir.mkdir(parents=True, exist_ok=True)
+        manifest = JobManifest.create(
+            manifest_path=work_dir / "manifest.json",
+            input_file=cfg.input,
+            config=cfg,
+            segments=segments,
+        )
+
+    try:
+        reporter = ProgressReporter(gpu_monitor=monitor)
+        engine = UpscaleEngine(cfg, gpu_monitor=monitor)
+        result_path = engine.run(
+            progress_callback=reporter.callback,
+            reporter=reporter,
+            manifest=manifest,
+        )
+        reporter.complete(result_path)
+    finally:
+        if monitor is not None:
+            if cfg.gpu_monitor.log_metrics and cfg.output:
+                csv_path = cfg.output.with_suffix(".gpu_metrics.csv")
+                monitor.export_csv(csv_path)
+            monitor.stop()

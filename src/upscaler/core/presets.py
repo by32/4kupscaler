@@ -79,6 +79,55 @@ PRESETS: dict[str, dict] = {
             "decode_tile_overlap": 160,
         },
     },
+    # Cloud presets — optimized for vast.ai instances
+    "vast-rtx3090": {
+        "model": "3b-fp8",
+        "batch_size": 5,
+        "blocks_to_swap": 12,
+        "preserve_vram": True,
+        "resolution": 1072,
+        "segment_size": 13,
+    },
+    "vast-rtx4090": {
+        "model": "7b-fp8",
+        "batch_size": 5,
+        "blocks_to_swap": 8,
+        "preserve_vram": False,
+        "resolution": 1072,
+        "segment_size": 21,
+    },
+    "vast-rtx3090-4k": {
+        "model": "3b-fp8",
+        "batch_size": 5,
+        "blocks_to_swap": 12,
+        "preserve_vram": True,
+        "resolution": 2160,
+        "segment_size": 9,
+        "vae_tiling": {
+            "encode_tiled": True,
+            "decode_tiled": True,
+            "encode_tile_size": 512,
+            "encode_tile_overlap": 160,
+            "decode_tile_size": 512,
+            "decode_tile_overlap": 160,
+        },
+    },
+    "vast-rtx4090-4k": {
+        "model": "7b-fp8",
+        "batch_size": 5,
+        "blocks_to_swap": 8,
+        "preserve_vram": False,
+        "resolution": 2160,
+        "segment_size": 13,
+        "vae_tiling": {
+            "encode_tiled": True,
+            "decode_tiled": True,
+            "encode_tile_size": 512,
+            "encode_tile_overlap": 160,
+            "decode_tile_size": 512,
+            "decode_tile_overlap": 160,
+        },
+    },
 }
 
 # GPU name substring -> preset name

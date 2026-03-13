@@ -24,4 +24,13 @@ def get_defaults() -> dict:
             "offload_io_components": False,
             "cache_model": False,
         },
+        "gpu_monitor": {
+            "enabled": False,
+            "poll_interval": 2.0,
+            "warn_temp_c": 85,
+            "critical_temp_c": 90,
+            "cooldown_target_c": 80,
+            "pause_on_overheat": True,
+            "log_metrics": True,
+        },
     }
