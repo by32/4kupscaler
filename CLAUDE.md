@@ -22,9 +22,11 @@ uv run upscaler --help       # CLI help
 
 ```
 src/upscaler/
-├── cli/          # Typer CLI: upscale, preview, batch, config subcommands
-├── core/         # Engine (orchestrator), models (HF registry), presets (GPU profiles), video_io
+├── cli/          # Typer CLI: upscale, preview, batch, config, cloud subcommands
+├── cloud/        # Vast.ai integration: job lifecycle, file transfer, preemption handling
+├── core/         # Engine (orchestrator), models (HF registry), presets (GPU profiles), video_io, checkpoint
 ├── config/       # Pydantic schema, TOML loader, defaults
+├── diagnostics/  # GPU monitoring (pynvml polling), thermal policy and cooldown
 ├── progress/     # Rich progress bars with optional VRAM display
 └── _vendor/seedvr2/  # Vendored ComfyUI node core (DO NOT modify without updating README)
 ```
@@ -43,8 +45,11 @@ src/upscaler/
 
 - All 4K inference MUST use BlockSwap + VAE tiling on RTX 3080 — never bypass. Use `--preset rtx3080-4k` or `--resolution 2160` (auto-enables tiling)
 - Frame counts must satisfy `frames % 4 == 1` (enforced by `enforce_4n1()` in `core/video_io.py`)
+- Segment sizes also follow the `4n+1` rule (validated by `UpscaleConfig`)
 - Coverage excludes `_vendor/` — only measure our wrapper code
 - GPU-dependent tests use `@pytest.mark.gpu` and auto-skip on Mac
+- Cloud jobs use checkpoint manifests (`core/checkpoint.py`) for preemption-safe resumability
+- Thermal policy checks run between segments when GPU monitoring is enabled (`diagnostics/thermal.py`)
 
 ## Verbosity
 
