@@ -47,8 +47,19 @@ class CloudJob:
 
     # -- public API --------------------------------------------------------
 
-    def submit(self, input_path: Path, preset: str | None = None) -> str:
+    def submit(
+        self,
+        input_path: Path,
+        preset: str | None = None,
+        segment_range: tuple[int, int] | None = None,
+    ) -> str:
         """Find cheapest instance, upload data, start processing.
+
+        Args:
+            input_path: Local path to the input video.
+            preset: Optional hardware preset for remote processing.
+            segment_range: Optional (start, end) segment indices. When set,
+                the remote upscaler only processes segments in [start, end).
 
         Returns:
             The job ID.
@@ -104,11 +115,15 @@ class CloudJob:
 
         # 6. Start remote processing
         preset_flag = f" --preset {preset}" if preset else ""
+        range_flag = ""
+        if segment_range is not None:
+            range_flag = f" --segment-range {segment_range[0]} {segment_range[1]}"
         cmd = (
             f"nohup upscaler upscale {REMOTE_INPUT}/{input_path.name}"
             f" -o {REMOTE_OUTPUT}/output.mp4"
             f" --checkpoint"
             f"{preset_flag}"
+            f"{range_flag}"
             f" -v"
             f" > {REMOTE_WORK}/upscaler.log 2>&1 &"
         )

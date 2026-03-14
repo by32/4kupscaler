@@ -135,6 +135,15 @@ class UpscaleConfig(BaseModel):
         ),
     )
 
+    # Segment range (for multi-GPU fleet processing)
+    segment_range: tuple[int, int] | None = Field(
+        default=None,
+        description=(
+            "Only process segments in range [start, end). "
+            "Used by fleet jobs to split work across instances."
+        ),
+    )
+
     # GPU monitoring
     gpu_monitor: GpuMonitorConfig = Field(default_factory=GpuMonitorConfig)
 

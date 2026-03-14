@@ -83,6 +83,13 @@ def upscale(
             help="Enable checkpointing for resumable segmented runs.",
         ),
     ] = False,
+    segment_range: Annotated[
+        list[int] | None,
+        typer.Option(
+            "--segment-range",
+            help="Only process segments [START, END). Used by fleet jobs.",
+        ),
+    ] = None,
     resume: Annotated[
         str | None,
         typer.Option(
@@ -121,6 +128,11 @@ def upscale(
         cli_overrides["vae_tiling"] = {"encode_tiled": True, "decode_tiled": True}
     if gpu_monitor is not None:
         cli_overrides["gpu_monitor"] = {"enabled": gpu_monitor}
+    if segment_range is not None:
+        if len(segment_range) != 2:
+            print_error("--segment-range requires exactly 2 values: START END")
+            raise typer.Exit(code=1)
+        cli_overrides["segment_range"] = tuple(segment_range)
 
     try:
         cfg = resolve_config(

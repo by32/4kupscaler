@@ -256,6 +256,17 @@ class UpscaleEngine:
         if reporter is not None and hasattr(reporter, "start_segmented"):
             reporter.start_segmented(total_segments)
 
+        # Determine segment range (for fleet/multi-GPU processing)
+        seg_range = None
+        if cfg.segment_range is not None:
+            seg_range = cfg.segment_range
+            logger.info(
+                "Fleet mode: processing segments [%d:%d) of %d",
+                seg_range[0],
+                seg_range[1],
+                total_segments,
+            )
+
         # Step 4: Process each segment, creating writer lazily after first
         # segment so we know the actual output dimensions from inference.
         writer = None
@@ -263,6 +274,11 @@ class UpscaleEngine:
         run_t0 = time.monotonic()
         try:
             for seg_idx, (seg_start, seg_end) in enumerate(segments):
+                # Skip segments outside assigned range (fleet mode)
+                if seg_range is not None and (
+                    seg_idx < seg_range[0] or seg_idx >= seg_range[1]
+                ):
+                    continue
                 # Preemption check
                 if (
                     self._preemption_handler is not None

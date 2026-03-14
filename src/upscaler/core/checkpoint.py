@@ -147,6 +147,73 @@ class JobManifest:
     def is_complete(self) -> bool:
         return all(s.status == "completed" for s in self.segments)
 
+    # -- worker management (fleet/multi-GPU) --------------------------------
+
+    @property
+    def workers(self) -> list[dict[str, Any]]:
+        """Worker assignments for fleet jobs."""
+        return self._data.get("workers", [])
+
+    def assign_workers(self, num_workers: int) -> list[dict[str, Any]]:
+        """Divide segments across *num_workers* and store assignments.
+
+        Each worker gets a contiguous slice of segment indices.
+        Returns the list of worker dicts.
+        """
+        total = len(self.segments)
+        num_workers = min(num_workers, total)
+        chunk, remainder = divmod(total, num_workers)
+
+        workers: list[dict[str, Any]] = []
+        offset = 0
+        for w in range(num_workers):
+            size = chunk + (1 if w < remainder else 0)
+            workers.append(
+                {
+                    "worker_id": w,
+                    "instance_id": None,
+                    "segment_start": offset,
+                    "segment_end": offset + size,
+                    "status": "pending",
+                }
+            )
+            offset += size
+
+        self._data["workers"] = workers
+        self.save()
+        return workers
+
+    def segments_for_worker(self, worker_id: int) -> tuple[int, int]:
+        """Return (start, end) segment range for a worker."""
+        for w in self.workers:
+            if w["worker_id"] == worker_id:
+                return (w["segment_start"], w["segment_end"])
+        raise ValueError(f"Unknown worker_id: {worker_id}")
+
+    def worker_complete(self, worker_id: int) -> bool:
+        """Check if all segments assigned to a worker are completed."""
+        start, end = self.segments_for_worker(worker_id)
+        return all(self.segments[i].status == "completed" for i in range(start, end))
+
+    def set_worker_instance(self, worker_id: int, instance_id: int) -> None:
+        """Record the vast.ai instance assigned to a worker."""
+        for w in self._data["workers"]:
+            if w["worker_id"] == worker_id:
+                w["instance_id"] = instance_id
+                w["status"] = "running"
+                self.save()
+                return
+        raise ValueError(f"Unknown worker_id: {worker_id}")
+
+    def set_worker_status(self, worker_id: int, status: str) -> None:
+        """Update a worker's status (pending, running, completed, failed)."""
+        for w in self._data["workers"]:
+            if w["worker_id"] == worker_id:
+                w["status"] = status
+                self.save()
+                return
+        raise ValueError(f"Unknown worker_id: {worker_id}")
+
     # -- properties --------------------------------------------------------
 
     @property
